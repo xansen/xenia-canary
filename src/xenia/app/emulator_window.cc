@@ -962,7 +962,7 @@ void EmulatorWindow::SetFullscreen(bool fullscreen) {
   }
   window_->SetFullscreen(fullscreen);
   window_->SetCursorVisibility(fullscreen
-                                   ? ui::Window::CursorVisibility::kAutoHidden
+                                   ? ui::Window::CursorVisibility::kHidden
                                    : ui::Window::CursorVisibility::kVisible);
 }
 
