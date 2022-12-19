@@ -703,98 +703,15 @@ Presenter::GuestOutputPaintFlow Presenter::GetGuestOutputPaintFlow(
   };
 
   // Final output location and dimensions.
-  // All host location calculations are DPI-independent, conceptually depending
-  // only on the aspect ratios, not the absolute values.
-  uint32_t output_width, output_height;
-  if (uint64_t(surface_width_in_paint_connection_) *
-          properties.display_aspect_ratio_y >
-      uint64_t(surface_height_in_paint_connection_) *
-          properties.display_aspect_ratio_x) {
-    // The window is wider that the source - crop along Y to preserve the aspect
-    // ratio while stretching throughout the entire surface's width, then limit
-    // the Y cropping via letterboxing or stretching along X.
-    uint32_t present_safe_area;
-    if (config.GetAllowOverscanCutoff() && cvars::present_safe_area_y > 0 &&
-        cvars::present_safe_area_y < 100) {
-      present_safe_area = uint32_t(cvars::present_safe_area_y);
-    } else {
-      present_safe_area = 100;
-    }
-    // Scale the desired width by the H:W aspect ratio (inverse of W:H) to get
-    // the height.
-    output_height = rescale_unsigned(surface_width_in_paint_connection_,
-                                     properties.display_aspect_ratio_y,
-                                     properties.display_aspect_ratio_x);
-    bool letterbox = false;
-    if (output_height * present_safe_area >
-        surface_height_in_paint_connection_ * 100) {
-      // Don't crop out more than the safe area margin - letterbox or stretch.
-      output_height = rescale_unsigned(surface_height_in_paint_connection_, 100,
-                                       present_safe_area);
-      letterbox = true;
-    }
-    if (letterbox && cvars::present_letterbox) {
-      output_width = rescale_unsigned(
-          surface_height_in_paint_connection_ * 100,
-          properties.display_aspect_ratio_x,
-          properties.display_aspect_ratio_y * present_safe_area);
-      // output_width might have been rounded up already by rescale_unsigned, so
-      // rounding down in this division.
-      flow.output_x = (int32_t(surface_width_in_paint_connection_) -
-                       int32_t(output_width)) /
-                      2;
-    } else {
-      output_width = surface_width_in_paint_connection_;
-      flow.output_x = 0;
-    }
-    // output_height might have been rounded up already by rescale_unsigned, so
-    // rounding down in this division.
-    flow.output_y = (int32_t(surface_height_in_paint_connection_) -
-                     int32_t(output_height)) /
-                    2;
-  } else {
-    // The window is taller that the source - crop along X to preserve the
-    // aspect ratio while stretching throughout the entire surface's height,
-    // then limit the X cropping via letterboxing or stretching along Y.
-    uint32_t present_safe_area;
-    if (config.GetAllowOverscanCutoff() && cvars::present_safe_area_x > 0 &&
-        cvars::present_safe_area_x < 100) {
-      present_safe_area = uint32_t(cvars::present_safe_area_x);
-    } else {
-      present_safe_area = 100;
-    }
-    // Scale the desired height by the W:H aspect ratio to get the width.
-    output_width = rescale_unsigned(surface_height_in_paint_connection_,
-                                    properties.display_aspect_ratio_x,
-                                    properties.display_aspect_ratio_y);
-    bool letterbox = false;
-    if (output_width * present_safe_area >
-        surface_width_in_paint_connection_ * 100) {
-      // Don't crop out more than the safe area margin - letterbox or stretch.
-      output_width = rescale_unsigned(surface_width_in_paint_connection_, 100,
-                                      present_safe_area);
-      letterbox = true;
-    }
-    if (letterbox && cvars::present_letterbox) {
-      output_height = rescale_unsigned(
-          surface_width_in_paint_connection_ * 100,
-          properties.display_aspect_ratio_y,
-          properties.display_aspect_ratio_x * present_safe_area);
-      // output_height might have been rounded up already by rescale_unsigned,
-      // so rounding down in this division.
-      flow.output_y = (int32_t(surface_height_in_paint_connection_) -
-                       int32_t(output_height)) /
-                      2;
-    } else {
-      output_height = surface_height_in_paint_connection_;
-      flow.output_y = 0;
-    }
-    // output_width might have been rounded up already by rescale_unsigned, so
-    // rounding down in this division.
-    flow.output_x =
-        (int32_t(surface_width_in_paint_connection_) - int32_t(output_width)) /
-        2;
-  }
+  uint32_t output_width = 1280, output_height = 720;
+  
+  flow.output_x =
+      (int32_t(surface_width_in_paint_connection_) - int32_t(output_width)) /
+      2;
+
+  flow.output_y =
+      (int32_t(surface_height_in_paint_connection_) - int32_t(output_height)) /
+      2;
 
   // Convert the location from surface pixels (which have 1:1 aspect ratio
   // relatively to the physical display) to render target pixels (the render
