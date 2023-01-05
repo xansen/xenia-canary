@@ -703,7 +703,7 @@ Presenter::GuestOutputPaintFlow Presenter::GetGuestOutputPaintFlow(
   };
 
   // Final output location and dimensions.
-  uint32_t output_width = 1280, output_height = 720;
+  uint32_t output_width = 1440, output_height = 720;
   
   flow.output_x =
       (int32_t(surface_width_in_paint_connection_) - int32_t(output_width)) /

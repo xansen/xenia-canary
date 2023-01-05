@@ -2198,7 +2198,7 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
 
   presenter->RefreshGuestOutput(
       uint32_t(swap_texture_desc.Width), uint32_t(swap_texture_desc.Height),
-      1280, 720,
+      1440, 720,
       [this, &swap_texture_srv_desc, frontbuffer_format, swap_texture_resource,
        &swap_texture_desc](
           ui::Presenter::GuestOutputRefreshContext& context) -> bool {

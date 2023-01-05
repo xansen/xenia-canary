@@ -141,7 +141,7 @@ EmulatorWindow::EmulatorWindow(Emulator* emulator,
     : emulator_(emulator),
       app_context_(app_context),
       window_listener_(*this),
-      window_(ui::Window::Create(app_context, kBaseTitle, 1280, 720)),
+      window_(ui::Window::Create(app_context, kBaseTitle, 1440, 720)),
       imgui_drawer_(
           std::make_unique<ui::ImGuiDrawer>(window_.get(), kZOrderImGui)),
       display_config_game_config_load_callback_(

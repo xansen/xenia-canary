@@ -1286,7 +1286,7 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
   }
 
   presenter->RefreshGuestOutput(
-      frontbuffer_width_scaled, frontbuffer_height_scaled, 1280, 720,
+      frontbuffer_width_scaled, frontbuffer_height_scaled, 1440, 720,
       [this, frontbuffer_width_scaled, frontbuffer_height_scaled,
        frontbuffer_format, swap_texture_view](
           ui::Presenter::GuestOutputRefreshContext& context) -> bool {
