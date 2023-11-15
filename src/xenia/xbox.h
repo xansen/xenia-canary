@@ -61,8 +61,9 @@ typedef uint32_t X_STATUS;
 #define X_STATUS_OBJECT_NAME_COLLISION                  ((X_STATUS)0xC0000035L)
 #define X_STATUS_INVALID_PAGE_PROTECTION                ((X_STATUS)0xC0000045L)
 #define X_STATUS_MUTANT_NOT_OWNED                       ((X_STATUS)0xC0000046L)
-#define X_STATUS_THREAD_IS_TERMINATING					((X_STATUS)0xC000004BL)
+#define X_STATUS_THREAD_IS_TERMINATING                  ((X_STATUS)0xC000004BL)
 #define X_STATUS_PROCEDURE_NOT_FOUND                    ((X_STATUS)0xC000007AL)
+#define X_STATUS_INVALID_IMAGE_FORMAT                   ((X_STATUS)0xC000007BL)
 #define X_STATUS_INSUFFICIENT_RESOURCES                 ((X_STATUS)0xC000009AL)
 #define X_STATUS_MEMORY_NOT_ALLOCATED                   ((X_STATUS)0xC00000A0L)
 #define X_STATUS_FILE_IS_A_DIRECTORY                    ((X_STATUS)0xC00000BAL)
@@ -70,6 +71,7 @@ typedef uint32_t X_STATUS;
 #define X_STATUS_INVALID_PARAMETER_1                    ((X_STATUS)0xC00000EFL)
 #define X_STATUS_INVALID_PARAMETER_2                    ((X_STATUS)0xC00000F0L)
 #define X_STATUS_INVALID_PARAMETER_3                    ((X_STATUS)0xC00000F1L)
+#define X_STATUS_PROCESS_IS_TERMINATING                 ((X_STATUS)0xC000010AL)
 #define X_STATUS_DLL_NOT_FOUND                          ((X_STATUS)0xC0000135L)
 #define X_STATUS_ENTRYPOINT_NOT_FOUND                   ((X_STATUS)0xC0000139L)
 #define X_STATUS_MAPPED_ALIGNMENT                       ((X_STATUS)0xC0000220L)
@@ -122,6 +124,10 @@ typedef uint32_t X_HRESULT;
 #define X_E_DEVICE_NOT_CONNECTED                X_HRESULT_FROM_WIN32(X_ERROR_DEVICE_NOT_CONNECTED)
 #define X_E_NOTFOUND                            X_HRESULT_FROM_WIN32(X_ERROR_NOT_FOUND)
 #define X_E_NO_SUCH_USER                        X_HRESULT_FROM_WIN32(X_ERROR_NO_SUCH_USER)
+
+//IOCTL_, used by NtDeviceIoControlFile
+constexpr uint32_t X_IOCTL_DISK_GET_DRIVE_GEOMETRY = 0x70000;
+constexpr uint32_t X_IOCTL_DISK_GET_PARTITION_INFO = 0x74004;
 
 // MEM_*, used by NtAllocateVirtualMemory
 enum X_MEM : uint32_t {
@@ -306,12 +312,68 @@ struct X_EX_TITLE_TERMINATE_REGISTRATION {
 };
 static_assert_size(X_EX_TITLE_TERMINATE_REGISTRATION, 16);
 
+
+enum X_OBJECT_HEADER_FLAGS : uint16_t {
+  OBJECT_HEADER_FLAG_NAMED_OBJECT =
+      1,  // if set, has X_OBJECT_HEADER_NAME_INFO prior to X_OBJECT_HEADER
+  OBJECT_HEADER_FLAG_IS_PERMANENT = 2,
+  OBJECT_HEADER_FLAG_CONTAINED_IN_DIRECTORY =
+      4,  // this object resides in an X_OBJECT_DIRECTORY
+  OBJECT_HEADER_IS_TITLE_OBJECT = 0x10,  // used in obcreateobject
+
+};
+
+// https://www.nirsoft.net/kernel_struct/vista/OBJECT_HEADER.html
+struct X_OBJECT_HEADER {
+  xe::be<uint32_t> pointer_count;
+  xe::be<uint32_t> handle_count;
+  xe::be<uint32_t> object_type_ptr;  // -0x8 POBJECT_TYPE
+  xe::be<uint16_t> flags;
+  uint8_t unknownE;
+  uint8_t unknownF;
+  // Object lives after this header.
+  // (There's actually a body field here which is the object itself)
+};
+static_assert_size(X_OBJECT_HEADER, 0x10);
+
+struct X_OBJECT_DIRECTORY {
+  // each is a pointer to X_OBJECT_HEADER_NAME_INFO
+  // i believe offset 0 = pointer to next in bucket
+  xe::be<uint32_t> name_buckets[13];
+};
+static_assert_size(X_OBJECT_DIRECTORY, 0x34);
+
+// https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/ntos/ob/object_header_name_info.htm
+// quite different, though
+struct X_OBJECT_HEADER_NAME_INFO {
+  // i think that this is the next link in an X_OBJECT_DIRECTORY's buckets
+  xe::be<uint32_t> next_in_directory;
+  xe::be<uint32_t> object_directory;  // pointer to X_OBJECT_DIRECTORY
+  X_ANSI_STRING name;
+};
 struct X_OBJECT_ATTRIBUTES {
   xe::be<uint32_t> root_directory;  // 0x0
   xe::be<uint32_t> name_ptr;        // 0x4 PANSI_STRING
   xe::be<uint32_t> attributes;      // 0xC
 };
+struct X_OBJECT_TYPE {
+  xe::be<uint32_t> allocate_proc;  // 0x0
+  xe::be<uint32_t> free_proc;      // 0x4
+  xe::be<uint32_t> close_proc;     // 0x8
+  xe::be<uint32_t> delete_proc;    // 0xC
+  xe::be<uint32_t> unknown_proc;   // 0x10
+  xe::be<uint32_t>
+      unknown_size_or_object_;  // this seems to be a union, it can be a pointer
+                                // or it can be the size of the object
+  xe::be<uint32_t> pool_tag;    // 0x18
+};
+static_assert_size(X_OBJECT_TYPE, 0x1C);
 
+struct X_KSYMLINK {
+  xe::be<uint32_t> refed_object_maybe;
+  X_ANSI_STRING refed_object_name_maybe;
+};
+static_assert_size(X_KSYMLINK, 0xC);
 // https://msdn.microsoft.com/en-us/library/windows/desktop/aa363082.aspx
 typedef struct {
   // Renamed due to a collision with exception_code from Windows excpt.h.
@@ -324,6 +386,10 @@ typedef struct {
 } X_EXCEPTION_RECORD;
 static_assert_size(X_EXCEPTION_RECORD, 0x50);
 
+struct X_KSPINLOCK {
+  xe::be<uint32_t> prcb_of_owner;
+};
+static_assert_size(X_KSPINLOCK, 4);
 #pragma pack(pop)
 
 // Found by dumping the kSectionStringTable sections of various games:

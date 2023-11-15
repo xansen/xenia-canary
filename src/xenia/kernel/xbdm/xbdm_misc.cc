@@ -114,6 +114,27 @@ dword_result_t DmFindPdbSignature_entry(lpdword_t unk0_ptr,
 }
 DECLARE_XBDM_EXPORT1(DmFindPdbSignature, kDebug, kStub);
 
+dword_result_t DmGetConsoleDebugMemoryStatus_entry() {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBDM_EXPORT1(DmGetConsoleDebugMemoryStatus, kDebug, kStub);
+
+void __CAP_Start_Profiling_entry(dword_t a1, dword_t a2) {}
+
+DECLARE_XBDM_EXPORT1(__CAP_Start_Profiling, kDebug, kStub);
+
+void __CAP_End_Profiling_entry() {}
+
+DECLARE_XBDM_EXPORT1(__CAP_End_Profiling, kDebug, kStub);
+
+void __CAP_Enter_Function_entry() {}
+
+DECLARE_XBDM_EXPORT1(__CAP_Enter_Function, kDebug, kStub);
+
+void __CAP_Exit_Function_entry() {}
+
+DECLARE_XBDM_EXPORT1(__CAP_Exit_Function, kDebug, kStub);
+
 }  // namespace xbdm
 }  // namespace kernel
 }  // namespace xe

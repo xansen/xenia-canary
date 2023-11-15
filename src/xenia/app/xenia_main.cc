@@ -422,7 +422,7 @@ bool EmulatorApp::OnInitialize() {
 
   std::filesystem::path cache_root = cvars::cache_root;
   if (cache_root.empty()) {
-    cache_root = storage_root / "cache";
+    cache_root = storage_root / "cache_host";
     // TODO(Triang3l): Point to the app's external storage "cache" directory on
     // Android.
   } else {
@@ -433,7 +433,7 @@ bool EmulatorApp::OnInitialize() {
     }
   }
   cache_root = std::filesystem::absolute(cache_root);
-  XELOGI("Cache root: {}", xe::path_to_utf8(cache_root));
+  XELOGI("Host cache root: {}", xe::path_to_utf8(cache_root));
 
   if (cvars::discord) {
     discord::DiscordPresence::Initialize();
@@ -614,7 +614,9 @@ void EmulatorApp::EmulatorThread() {
   if (!path.empty()) {
     // Normalize the path and make absolute.
     auto abs_path = std::filesystem::absolute(path);
-    result = emulator_->LaunchPath(abs_path);
+
+    result = app_context().CallInUIThread(
+        [this, abs_path]() { return emulator_window_->RunTitle(abs_path); });
     if (XFAILED(result)) {
       xe::FatalError(fmt::format("Failed to launch target: {:08X}", result));
       app_context().RequestDeferredQuit();

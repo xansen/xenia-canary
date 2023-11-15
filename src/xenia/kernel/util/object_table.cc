@@ -132,7 +132,13 @@ X_STATUS ObjectTable::AddHandle(XObject* object, X_HANDLE* out_handle) {
       entry.object = object;
       entry.handle_ref_count = 1;
       handle = slot << 2;
-      if (!host_object) handle += XObject::kHandleBase;
+      if (!host_object) {
+        if (object->type() != XObject::Type::Socket) {
+          handle += XObject::kHandleBase;
+        }
+      } else {
+        handle += XObject::kHandleHostBase;
+      }
       object->handles().push_back(handle);
 
       // Retain so long as the object is in the table.
@@ -286,10 +292,9 @@ ObjectTable::ObjectTableEntry* ObjectTable::LookupTableInLock(X_HANDLE handle) {
     return nullptr;
   }
 
-  // Lower 2 bits are ignored.
-  bool host = (handle < XObject::kHandleBase);
-  uint32_t slot = GetHandleSlot(handle, host);
-  if (host) {
+  const bool is_host_object = XObject::is_handle_host_object(handle);
+  uint32_t slot = GetHandleSlot(handle, is_host_object);
+  if (is_host_object) {
     if (slot <= host_table_capacity_) {
       return &host_table_[slot];
     }
@@ -320,12 +325,11 @@ XObject* ObjectTable::LookupObject(X_HANDLE handle, bool already_locked) {
     global_critical_region_.mutex().lock();
   }
 
-  // Lower 2 bits are ignored.
-  bool host = (handle < XObject::kHandleBase);
-  uint32_t slot = GetHandleSlot(handle, host);
+  const bool is_host_object = XObject::is_handle_host_object(handle);
+  uint32_t slot = GetHandleSlot(handle, is_host_object);
 
   // Verify slot.
-  if (host) {
+  if (is_host_object) {
     if (slot < host_table_capacity_) {
       ObjectTableEntry& entry = host_table_[slot];
       if (entry.object) {
@@ -461,18 +465,56 @@ bool ObjectTable::Restore(ByteStream* stream) {
 }
 
 X_STATUS ObjectTable::RestoreHandle(X_HANDLE handle, XObject* object) {
-  bool host = (handle < XObject::kHandleBase);
-  uint32_t slot = GetHandleSlot(handle, host);
-  uint32_t capacity = host ? host_table_capacity_ : table_capacity_;
+  const bool is_host_object = XObject::is_handle_host_object(handle);
+  uint32_t slot = GetHandleSlot(handle, is_host_object);
+  uint32_t capacity = is_host_object ? host_table_capacity_ : table_capacity_;
   assert_true(capacity >= slot);
 
   if (capacity >= slot) {
-    auto& entry = host ? host_table_[slot] : table_[slot];
+    auto& entry = is_host_object ? host_table_[slot] : table_[slot];
     entry.object = object;
     object->Retain();
   }
 
   return X_STATUS_SUCCESS;
+}
+
+void ObjectTable::MapGuestObjectToHostHandle(uint32_t guest_object,
+                                             X_HANDLE host_handle) {
+  auto global_lock = global_critical_region_.Acquire();
+  guest_to_host_handle_[guest_object] = host_handle;
+}
+bool ObjectTable::HostHandleForGuestObject(uint32_t guest_object, X_HANDLE& out) {
+  auto global_lock = global_critical_region_.Acquire();
+  auto gobj_iter = guest_to_host_handle_.find(guest_object);
+  if (gobj_iter == guest_to_host_handle_.end()) {
+    return false;
+  }
+  out = gobj_iter->second;
+  return true;
+}
+
+void ObjectTable::UnmapGuestObjectHostHandle(uint32_t guest_object) {
+  auto global_lock = global_critical_region_.Acquire();
+  auto iter = guest_to_host_handle_.find(guest_object);
+  if (iter == guest_to_host_handle_.end()) {
+    return;
+  } else {
+    guest_to_host_handle_.erase(iter);
+  }
+}
+void ObjectTable::FlushGuestToHostMapping(uint32_t base_address,
+                                          uint32_t length) {
+  auto global_lock = global_critical_region_.Acquire();
+  auto iterator = guest_to_host_handle_.lower_bound(base_address);
+
+  while (iterator !=guest_to_host_handle_.end() && iterator->first >= base_address && iterator->first < (base_address + length)) {
+    auto old_mapping = iterator;
+
+    iterator++;
+    auto node_handle = guest_to_host_handle_.extract(old_mapping);
+
+  }
 }
 
 }  // namespace util

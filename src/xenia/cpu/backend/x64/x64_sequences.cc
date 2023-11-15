@@ -1018,8 +1018,7 @@ struct COMPARE_EQ_F32
     e.ChangeMxcsrMode(MXCSRMode::Fpu);
     if (!HasPrecedingCmpOfSameValues(i.instr)) {
       EmitCommutativeBinaryXmmOp(
-          e, i,
-          [](X64Emitter& e, I8Op dest, const Xmm& src1, const Xmm& src2) {
+          e, i, [](X64Emitter& e, I8Op dest, const Xmm& src1, const Xmm& src2) {
             e.vcomiss(src1, src2);
           });
     }
@@ -1032,8 +1031,7 @@ struct COMPARE_EQ_F64
     e.ChangeMxcsrMode(MXCSRMode::Fpu);
     if (!HasPrecedingCmpOfSameValues(i.instr)) {
       EmitCommutativeBinaryXmmOp(
-          e, i,
-          [](X64Emitter& e, I8Op dest, const Xmm& src1, const Xmm& src2) {
+          e, i, [](X64Emitter& e, I8Op dest, const Xmm& src1, const Xmm& src2) {
             e.vcomisd(src1, src2);
           });
     }
@@ -1935,53 +1933,6 @@ struct MUL_ADD_V128
 };
 EMITTER_OPCODE_TABLE(OPCODE_MUL_ADD, MUL_ADD_F32, MUL_ADD_F64, MUL_ADD_V128);
 
-struct NEGATED_MUL_ADD_F64
-    : Sequence<NEGATED_MUL_ADD_F64,
-               I<OPCODE_NEGATED_MUL_ADD, F64Op, F64Op, F64Op, F64Op>> {
-  static void Emit(X64Emitter& e, const EmitArgType& i) {
-    e.ChangeMxcsrMode(MXCSRMode::Fpu);
-
-    Xmm src1 = GetInputRegOrConstant(e, i.src1, e.xmm0);
-    Xmm src2 = GetInputRegOrConstant(e, i.src2, e.xmm1);
-    Xmm src3 = GetInputRegOrConstant(e, i.src3, e.xmm2);
-    if (e.IsFeatureEnabled(kX64EmitFMA)) {
-      // todo: this is garbage
-      e.vmovapd(e.xmm3, src1);
-      e.vfmadd213sd(e.xmm3, src2, src3);
-      e.vxorpd(i.dest, e.xmm3, e.GetXmmConstPtr(XMMSignMaskPD));
-    } else {
-      // todo: might need to use x87 in this case...
-      e.vmulsd(e.xmm3, src1, src2);
-      e.vaddsd(i.dest, e.xmm3, src3);
-      e.vxorpd(i.dest, i.dest, e.GetXmmConstPtr(XMMSignMaskPD));
-    }
-  }
-};
-struct NEGATED_MUL_ADD_V128
-    : Sequence<NEGATED_MUL_ADD_V128,
-               I<OPCODE_NEGATED_MUL_ADD, V128Op, V128Op, V128Op, V128Op>> {
-  static void Emit(X64Emitter& e, const EmitArgType& i) {
-    e.ChangeMxcsrMode(MXCSRMode::Vmx);
-
-    Xmm src1 = GetInputRegOrConstant(e, i.src1, e.xmm0);
-    Xmm src2 = GetInputRegOrConstant(e, i.src2, e.xmm1);
-    Xmm src3 = GetInputRegOrConstant(e, i.src3, e.xmm2);
-    if (e.IsFeatureEnabled(kX64EmitFMA)) {
-      // todo: this is garbage
-      e.vmovaps(e.xmm3, src1);
-      e.vfmadd213ps(e.xmm3, src2, src3);
-      e.vxorps(i.dest, e.xmm3, e.GetXmmConstPtr(XMMSignMaskPS));
-    } else {
-      // todo: might need to use x87 in this case...
-      e.vmulps(e.xmm3, src1, src2);
-      e.vaddps(i.dest, e.xmm3, src3);
-      e.vxorps(i.dest, i.dest, e.GetXmmConstPtr(XMMSignMaskPS));
-    }
-  }
-};
-EMITTER_OPCODE_TABLE(OPCODE_NEGATED_MUL_ADD, NEGATED_MUL_ADD_F64,
-                     NEGATED_MUL_ADD_V128);
-
 // ============================================================================
 // OPCODE_MUL_SUB
 // ============================================================================
@@ -2037,53 +1988,6 @@ struct MUL_SUB_V128
   }
 };
 EMITTER_OPCODE_TABLE(OPCODE_MUL_SUB, MUL_SUB_F64, MUL_SUB_V128);
-
-struct NEGATED_MUL_SUB_F64
-    : Sequence<NEGATED_MUL_SUB_F64,
-               I<OPCODE_NEGATED_MUL_SUB, F64Op, F64Op, F64Op, F64Op>> {
-  static void Emit(X64Emitter& e, const EmitArgType& i) {
-    e.ChangeMxcsrMode(MXCSRMode::Fpu);
-
-    Xmm src1 = GetInputRegOrConstant(e, i.src1, e.xmm0);
-    Xmm src2 = GetInputRegOrConstant(e, i.src2, e.xmm1);
-    Xmm src3 = GetInputRegOrConstant(e, i.src3, e.xmm2);
-    if (e.IsFeatureEnabled(kX64EmitFMA)) {
-      // todo: this is garbage
-      e.vmovapd(e.xmm3, src1);
-      e.vfmsub213sd(e.xmm3, src2, src3);
-      e.vxorpd(i.dest, e.xmm3, e.GetXmmConstPtr(XMMSignMaskPD));
-    } else {
-      // todo: might need to use x87 in this case...
-      e.vmulsd(e.xmm3, src1, src2);
-      e.vsubsd(i.dest, e.xmm3, src3);
-      e.vxorpd(i.dest, i.dest, e.GetXmmConstPtr(XMMSignMaskPD));
-    }
-  }
-};
-struct NEGATED_MUL_SUB_V128
-    : Sequence<NEGATED_MUL_SUB_V128,
-               I<OPCODE_NEGATED_MUL_SUB, V128Op, V128Op, V128Op, V128Op>> {
-  static void Emit(X64Emitter& e, const EmitArgType& i) {
-    e.ChangeMxcsrMode(MXCSRMode::Vmx);
-
-    Xmm src1 = GetInputRegOrConstant(e, i.src1, e.xmm0);
-    Xmm src2 = GetInputRegOrConstant(e, i.src2, e.xmm1);
-    Xmm src3 = GetInputRegOrConstant(e, i.src3, e.xmm2);
-    if (e.IsFeatureEnabled(kX64EmitFMA)) {
-      // todo: this is garbage
-      e.vmovaps(e.xmm3, src1);
-      e.vfmsub213ps(e.xmm3, src2, src3);
-      e.vxorps(i.dest, e.xmm3, e.GetXmmConstPtr(XMMSignMaskPS));
-    } else {
-      // todo: might need to use x87 in this case...
-      e.vmulps(e.xmm3, src1, src2);
-      e.vsubps(i.dest, e.xmm3, src3);
-      e.vxorps(i.dest, i.dest, e.GetXmmConstPtr(XMMSignMaskPS));
-    }
-  }
-};
-EMITTER_OPCODE_TABLE(OPCODE_NEGATED_MUL_SUB, NEGATED_MUL_SUB_F64,
-                     NEGATED_MUL_SUB_V128);
 
 // ============================================================================
 // OPCODE_NEG
@@ -2206,25 +2110,28 @@ struct RSQRT_F64 : Sequence<RSQRT_F64, I<OPCODE_RSQRT, F64Op, F64Op>> {
   static void Emit(X64Emitter& e, const EmitArgType& i) {
     e.ChangeMxcsrMode(MXCSRMode::Fpu);
     Xmm src1 = GetInputRegOrConstant(e, i.src1, e.xmm3);
-    if (e.IsFeatureEnabled(kX64EmitAVX512Ortho)) {
-      e.vrsqrt14sd(i.dest, src1, src1);
-    } else {
-      e.vmovapd(e.xmm0, e.GetXmmConstPtr(XMMOnePD));
-      e.vsqrtsd(e.xmm1, src1, src1);
-      e.vdivsd(i.dest, e.xmm0, e.xmm1);
-    }
+    e.vmovsd(e.xmm0, src1);
+    e.call(e.backend()->frsqrtefp_helper);
+    e.vmovsd(i.dest, e.xmm0);
   }
 };
 struct RSQRT_V128 : Sequence<RSQRT_V128, I<OPCODE_RSQRT, V128Op, V128Op>> {
   static void Emit(X64Emitter& e, const EmitArgType& i) {
     e.ChangeMxcsrMode(MXCSRMode::Vmx);
     Xmm src1 = GetInputRegOrConstant(e, i.src1, e.xmm3);
-    if (e.IsFeatureEnabled(kX64EmitAVX512Ortho)) {
-      e.vrsqrt14ps(i.dest, src1);
+    /*
+        the vast majority of inputs to vrsqrte come from vmsum3 or vmsum4 as part
+        of a vector normalization sequence. in fact, its difficult to find uses of vrsqrte in titles
+        that have inputs which do not come from vmsum.
+    */
+    if (i.src1.value && i.src1.value->AllFloatVectorLanesSameValue()) {
+      e.vmovss(e.xmm0, src1);
+      e.call(e.backend()->vrsqrtefp_scalar_helper);
+      e.vshufps(i.dest, e.xmm0, e.xmm0, 0);
     } else {
-      e.vmovaps(e.xmm0, e.GetXmmConstPtr(XMMOne));
-      e.vsqrtps(e.xmm1, src1);
-      e.vdivps(i.dest, e.xmm0, e.xmm1);
+      e.vmovaps(e.xmm0, src1);
+      e.call(e.backend()->vrsqrtefp_vector_helper);
+      e.vmovaps(i.dest, e.xmm0);
     }
   }
 };
@@ -2641,7 +2548,8 @@ void EmitAndNotXX(X64Emitter& e, const ARGS& i) {
     // src1 constant.
     // `and` instruction only supports up to 32-bit immediate constants
     // 64-bit constants will need a temp register
-	  //only possible with 64 bit inputs, andc is the only instruction that generates this
+    // only possible with 64 bit inputs, andc is the only instruction that
+    // generates this
     auto temp = GetTempReg<typename decltype(i.src1)::reg_type>(e);
     e.mov(temp, i.src1.constant());
 
@@ -3278,16 +3186,37 @@ struct SET_ROUNDING_MODE_I32
     // removed the And with 7 and hoisted that and into the InstrEmit_'s that
     // generate OPCODE_SET_ROUNDING_MODE so that it can be constant folded and
     // backends dont have to worry about it
+    auto flags_ptr = e.GetBackendFlagsPtr();
     if (i.src1.is_constant) {
-      e.mov(e.eax, mxcsr_table[i.src1.constant()]);
+      unsigned constant_value = i.src1.constant();
+      e.mov(e.eax, mxcsr_table[constant_value]);
+
+      if (constant_value & 4) {
+        e.or_(flags_ptr, 1U << kX64BackendNonIEEEMode);
+      }
+      else {
+        e.btr(flags_ptr, kX64BackendNonIEEEMode);
+      }
       e.mov(e.dword[e.rsp + StackLayout::GUEST_SCRATCH], e.eax);
       e.mov(e.GetBackendCtxPtr(offsetof(X64BackendContext, mxcsr_fpu)), e.eax);
       e.vldmxcsr(e.dword[e.rsp + StackLayout::GUEST_SCRATCH]);
 
     } else {
-      e.mov(e.ecx, i.src1);
+      //can andnot, but this is a very infrequently used opcode
+      e.mov(e.eax, 1U << kX64BackendNonIEEEMode);
+      e.mov(e.edx, e.eax);
+      e.not_(e.edx);
+      e.mov(e.ecx, flags_ptr);
+      //edx = flags w/ non ieee cleared
+      e.and_(e.edx, e.ecx);
+      //eax = flags w/ non ieee set
+      e.or_(e.eax, e.ecx);
+      e.bt(i.src1, 2);
 
+      e.mov(e.ecx, i.src1);
+      e.cmovc(e.edx, e.eax);
       e.mov(e.rax, uintptr_t(mxcsr_table));
+      e.mov(flags_ptr, e.edx);
       e.mov(e.edx, e.ptr[e.rax + e.rcx * 4]);
       // this was not here
       e.mov(e.GetBackendCtxPtr(offsetof(X64BackendContext, mxcsr_fpu)), e.edx);

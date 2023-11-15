@@ -481,6 +481,43 @@ struct VECTOR_COMPARE_UGT_V128
     : Sequence<VECTOR_COMPARE_UGT_V128,
                I<OPCODE_VECTOR_COMPARE_UGT, V128Op, V128Op, V128Op>> {
   static void Emit(X64Emitter& e, const EmitArgType& i) {
+    if (e.IsFeatureEnabled(kX64EmitAVX512Ortho | kX64EmitAVX512BW |
+                           kX64EmitAVX512DQ) &&
+        (i.instr->flags != FLOAT32_TYPE)) {
+      Xmm src1 = e.xmm0;
+      if (i.src1.is_constant) {
+        e.LoadConstantXmm(src1, i.src1.constant());
+      } else {
+        src1 = i.src1;
+      }
+
+      Xmm src2 = e.xmm1;
+      if (i.src2.is_constant) {
+        e.LoadConstantXmm(src2, i.src2.constant());
+      } else {
+        src2 = i.src2;
+      }
+
+      switch (i.instr->flags) {
+        case INT8_TYPE:
+          e.vpcmpub(e.k1, src1, src2, 0x6);
+          e.vpmovm2b(i.dest, e.k1);
+          break;
+        case INT16_TYPE:
+          e.vpcmpuw(e.k1, src1, src2, 0x6);
+          e.vpmovm2w(i.dest, e.k1);
+          break;
+        case INT32_TYPE:
+          e.vpcmpud(e.k1, src1, src2, 0x6);
+          e.vpmovm2d(i.dest, e.k1);
+          break;
+        default:
+          assert_always();
+          break;
+      }
+      return;
+    }
+
     Xbyak::Address sign_addr = e.ptr[e.rax];  // dummy
     switch (i.instr->flags) {
       case INT8_TYPE:
@@ -3339,17 +3376,28 @@ struct SET_NJM_I8 : Sequence<SET_NJM_I8, I<OPCODE_SET_NJM, VoidOp, I8Op>> {
     auto addr_vmx = e.GetBackendCtxPtr(offsetof(X64BackendContext, mxcsr_vmx));
 
     addr_vmx.setBit(32);
+    auto flags_ptr = e.GetBackendFlagsPtr();
     if (i.src1.is_constant) {
       if (i.src1.constant() == 0) {
         // turn off daz/flush2z
         e.mov(addr_vmx, _MM_MASK_MASK);
+        e.btr(flags_ptr, kX64BackendNJMOn);
 
       } else {
         e.mov(addr_vmx, DEFAULT_VMX_MXCSR);
+        e.bts(flags_ptr, kX64BackendNJMOn);
       }
 
     } else {
+      e.mov(e.eax, flags_ptr);
+      e.mov(e.edx, 1U << kX64BackendNJMOn);
+      e.mov(e.ecx, e.edx);
+      e.not_(e.ecx);
+      e.and_(e.ecx, e.eax);
+      e.or_(e.edx, e.eax);
       e.test(i.src1, i.src1);
+      e.cmove(e.edx, e.ecx);
+      e.mov(flags_ptr, e.edx);
       e.mov(e.edx, DEFAULT_VMX_MXCSR);
       e.mov(e.eax, _MM_MASK_MASK);
 

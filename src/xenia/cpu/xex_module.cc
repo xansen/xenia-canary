@@ -37,12 +37,18 @@ DEFINE_bool(disable_instruction_infocache, false,
             "Disables caching records of called instructions/mmio accesses.",
             "CPU");
 
+DEFINE_bool(writable_code_segments, false,
+            "Enables a program to write to its own code segments in memory.",
+            "CPU");
+
 DEFINE_bool(
     enable_early_precompilation, false,
     "Enable pre-compiling guest functions that we know we've called/that "
     "we've recognized as being functions via simple heuristics, good for error "
     "finding/stress testing with the JIT",
     "CPU");
+
+DECLARE_bool(allow_plugins);
 
 static const uint8_t xe_xex2_retail_key[16] = {
     0x20, 0xB1, 0x85, 0xA5, 0x9D, 0x28, 0xFD, 0xC3,
@@ -1069,6 +1075,11 @@ bool XexModule::LoadContinue() {
     }
   }
 
+  // Disable write protection if plugins are enabled
+  if (cvars::allow_plugins && !cvars::writable_code_segments) {
+    OVERRIDE_bool(writable_code_segments, true);
+  }
+
   // Setup memory protection.
   for (uint32_t i = 0, page = 0; i < sec_header->page_descriptor_count; i++) {
     // Byteswap the bitfield manually.
@@ -1080,7 +1091,10 @@ bool XexModule::LoadContinue() {
     switch (desc.info) {
       case XEX_SECTION_CODE:
       case XEX_SECTION_READONLY_DATA:
-        heap->Protect(address, size, kMemoryProtectRead);
+        heap->Protect(address, size,
+                      cvars::writable_code_segments
+                          ? kMemoryProtectRead | kMemoryProtectWrite
+                          : kMemoryProtectRead);
         break;
       case XEX_SECTION_DATA:
         heap->Protect(address, size, kMemoryProtectRead | kMemoryProtectWrite);
@@ -1106,7 +1120,7 @@ void XexModule::Precompile() {
 
   char fmtbuf[16];
 
-  for (unsigned i = 0; i < 16; ++i) {
+  for (unsigned i = 0; i < 20; ++i) {
     sprintf_s(fmtbuf, "%X", image_sha_bytes_[i]);
     image_sha_str_ += &fmtbuf[0];
   }

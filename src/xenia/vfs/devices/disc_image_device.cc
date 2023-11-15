@@ -32,6 +32,8 @@ bool DiscImageDevice::Initialize() {
   if (!mmap_) {
     XELOGE("Disc image could not be mapped");
     return false;
+  } else {
+    XELOGFS("DiscImageDevice::Initialize");
   }
 
   ParseState state = {0};

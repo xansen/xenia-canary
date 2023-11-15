@@ -9,8 +9,9 @@
 
 #include "xenia/vfs/virtual_file_system.h"
 #include "xenia/kernel/xam/content_manager.h"
-#include "xenia/vfs/devices/stfs_container_device.h"
+#include "xenia/vfs/devices/xcontent_container_device.h"
 
+#include "devices/host_path_entry.h"
 #include "xenia/base/literals.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/string.h"
@@ -221,6 +222,22 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry,
     if (entry->attributes() & kFileAttributeDirectory && is_non_directory) {
       return X_STATUS_FILE_IS_A_DIRECTORY;
     }
+
+    // If the entry does not exist on the host then remove the cached entry
+    if (parent_entry) {
+      const xe::vfs::HostPathEntry* host_Path =
+          dynamic_cast<const xe::vfs::HostPathEntry*>(parent_entry);
+
+      if (host_Path) {
+        auto const file_path = host_Path->host_path() / entry->name();
+
+        if (!std::filesystem::exists(file_path)) {
+          // Remove cached entry
+          entry->Delete();
+          entry = nullptr;
+        }
+      }
+    }
   }
 
   // Check if exists (if we need it to), or that it doesn't (if it shouldn't).
@@ -387,7 +404,8 @@ X_STATUS VirtualFileSystem::ExtractContentFiles(
 
 void VirtualFileSystem::ExtractContentHeader(Device* device,
                                              std::filesystem::path base_path) {
-  auto stfs_device = ((StfsContainerDevice*)device);
+  const XContentContainerDevice* xcontent_device =
+      ((XContentContainerDevice*)device);
 
   if (!std::filesystem::exists(base_path.parent_path())) {
     if (!std::filesystem::create_directories(base_path.parent_path())) {
@@ -400,7 +418,8 @@ void VirtualFileSystem::ExtractContentHeader(Device* device,
 
   if (std::filesystem::exists(header_path)) {
     auto file = xe::filesystem::OpenFile(header_path, "wb");
-    kernel::xam::XCONTENT_AGGREGATE_DATA data = stfs_device->content_header();
+    kernel::xam::XCONTENT_AGGREGATE_DATA data =
+        xcontent_device->content_header();
     data.set_file_name(base_path.filename().string());
     fwrite(&data, 1, sizeof(kernel::xam::XCONTENT_AGGREGATE_DATA), file);
     fclose(file);

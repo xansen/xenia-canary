@@ -49,9 +49,6 @@ class ObjectTable {
   X_STATUS RestoreHandle(X_HANDLE handle, XObject* object);
   template <typename T>
   object_ref<T> LookupObject(X_HANDLE handle, bool already_locked = false) {
-    if (T::kObjectType == XObject::Type::Socket) {
-      handle |= XObject::kHandleBase;
-    }
     auto object = LookupObject(handle, already_locked);
     if (object) {
       assert_true(object->type() == T::kObjectType);
@@ -83,6 +80,10 @@ class ObjectTable {
   std::vector<object_ref<XObject>> GetAllObjects();
   void PurgeAllObjects();  // Purges the object table of all guest objects
 
+  void MapGuestObjectToHostHandle(uint32_t guest_object, X_HANDLE host_handle);
+  void UnmapGuestObjectHostHandle(uint32_t guest_object);
+  bool HostHandleForGuestObject(uint32_t guest_object, X_HANDLE& out);
+  void FlushGuestToHostMapping(uint32_t base_address, uint32_t length);
  private:
   struct ObjectTableEntry {
     int handle_ref_count = 0;
@@ -96,7 +97,7 @@ class ObjectTable {
 
   X_HANDLE TranslateHandle(X_HANDLE handle);
   static constexpr uint32_t GetHandleSlot(X_HANDLE handle, bool host) {
-    if (!host) handle -= XObject::kHandleBase;
+    handle &= host ? ~XObject::kHandleHostBase : ~XObject::kHandleBase;
     return handle >> 2;
   }
   X_STATUS FindFreeSlot(uint32_t* out_slot, bool host);
@@ -110,6 +111,7 @@ class ObjectTable {
   uint32_t last_free_entry_ = 0;
   uint32_t last_free_host_entry_ = 0;
   std::unordered_map<string_key_case, X_HANDLE> name_table_;
+  std::map<uint32_t, X_HANDLE> guest_to_host_handle_;
 };
 
 // Generic lookup
