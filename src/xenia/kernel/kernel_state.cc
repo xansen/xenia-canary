@@ -34,6 +34,13 @@
 
 DEFINE_bool(apply_title_update, true, "Apply title updates.", "Kernel");
 
+DEFINE_uint32(max_signed_profiles, 4,
+              "Limits how many profiles can be assigned. Possible values: 1-4",
+              "Kernel");
+
+DEFINE_uint32(kernel_build_version, 1888, "Define current kernel version",
+              "Kernel");
+
 namespace xe {
 namespace kernel {
 
@@ -62,6 +69,7 @@ KernelState::KernelState(Emulator* emulator)
   user_profiles_.emplace(0, std::make_unique<xam::UserProfile>(0));
 
   InitializeKernelGuestGlobals();
+  kernel_version_ = KernelVersion(cvars::kernel_build_version);
 
   auto content_root = emulator_->content_root();
   if (!content_root.empty()) {
@@ -1091,7 +1099,7 @@ void KernelState::EmulateCPInterruptDPC(uint32_t interrupt_callback,
 void KernelState::UpdateUsedUserProfiles() {
   const uint8_t used_slots_bitmask = GetConnectedUsers();
 
-  for (uint32_t i = 1; i < 4; i++) {
+  for (uint32_t i = 1; i < cvars::max_signed_profiles; i++) {
     bool is_used = used_slots_bitmask & (1 << i);
 
     if (IsUserSignedIn(i) && !is_used) {
@@ -1213,7 +1221,7 @@ void KernelState::InitializeKernelGuestGlobals() {
 
   KernelGuestGlobals* block =
       memory_->TranslateVirtual<KernelGuestGlobals*>(kernel_guest_globals_);
-  memset(block, 0, sizeof(block));
+  memset(block, 0, sizeof(KernelGuestGlobals));
 
   auto idle_process = memory()->TranslateVirtual<X_KPROCESS*>(GetIdleProcess());
   InitializeProcess(idle_process, X_PROCTYPE_IDLE, 0, 0, 0);
@@ -1314,7 +1322,7 @@ void KernelState::InitializeKernelGuestGlobals() {
   block->ObSymbolicLinkObjectType.delete_proc =
       kernel_trampoline_group_.NewLongtermTrampoline(DeleteSymlink);
 
-#define offsetof32(s, m) static_cast<uint32_t>( offsetof(s, m) )
+#define offsetof32(s, m) static_cast<uint32_t>(offsetof(s, m))
 
   host_object_type_enum_to_guest_object_type_ptr_ = {
       {XObject::Type::Event,

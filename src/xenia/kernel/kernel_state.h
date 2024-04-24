@@ -48,6 +48,8 @@ namespace kernel {
 
 constexpr fourcc_t kKernelSaveSignature = make_fourcc("KRNL");
 
+static constexpr const uint16_t kBaseKernelBuildVersion = 1888;
+
 // (?), used by KeGetCurrentProcessType
 constexpr uint32_t X_PROCTYPE_IDLE = 0;
 constexpr uint32_t X_PROCTYPE_TITLE = 1;
@@ -109,6 +111,7 @@ struct X_UNKNOWN_TYPE_REFED {
       points_to_prior;  // points to the previous field, which points to itself
 };
 static_assert_size(X_UNKNOWN_TYPE_REFED, 16);
+
 struct KernelGuestGlobals {
   X_OBJECT_TYPE ExThreadObjectType;
   X_OBJECT_TYPE ExEventObjectType;
@@ -144,6 +147,27 @@ struct KernelGuestGlobals {
 struct DPCImpersonationScope {
   uint8_t previous_irql_;
 };
+
+struct KernelVersion {
+  union {
+    xe::be<uint64_t> value;
+
+    struct {
+      xe::be<uint16_t> major;
+      xe::be<uint16_t> minor;
+      xe::be<uint16_t> build;
+      xe::be<uint16_t> qfe;
+    };
+  };
+
+  KernelVersion(uint16_t build_ver = kBaseKernelBuildVersion) {
+    major = 2;
+    minor = 0;
+    build = std::max(kBaseKernelBuildVersion, build_ver);
+    qfe = 0;
+  }
+};
+
 class KernelState {
  public:
   explicit KernelState(Emulator* emulator);
@@ -198,6 +222,8 @@ class KernelState {
 
   // Access must be guarded by the global critical region.
   util::ObjectTable* object_table() { return &object_table_; }
+
+  const KernelVersion* GetKernelVersion() const { return &kernel_version_; }
 
   uint32_t GetSystemProcess() const {
     return kernel_guest_globals_ + offsetof(KernelGuestGlobals, system_process);
@@ -296,6 +322,7 @@ class KernelState {
   bool Restore(ByteStream* stream);
 
   uint32_t notification_position_ = 2;
+  XDeploymentType deployment_type_ = XDeploymentType::kUnknown;
 
   uint32_t GetKeTimestampBundle();
 
@@ -304,11 +331,13 @@ class KernelState {
   uint32_t CreateKeTimestampBundle();
   void UpdateKeTimestampBundle();
 
-  void BeginDPCImpersonation(cpu::ppc::PPCContext* context, DPCImpersonationScope& scope);
+  void BeginDPCImpersonation(cpu::ppc::PPCContext* context,
+                             DPCImpersonationScope& scope);
   void EndDPCImpersonation(cpu::ppc::PPCContext* context,
                            DPCImpersonationScope& end_scope);
 
-  void EmulateCPInterruptDPC(uint32_t interrupt_callback,uint32_t interrupt_callback_data, uint32_t source,
+  void EmulateCPInterruptDPC(uint32_t interrupt_callback,
+                             uint32_t interrupt_callback_data, uint32_t source,
                              uint32_t cpu);
 
  private:
@@ -327,6 +356,8 @@ class KernelState {
   std::unique_ptr<xam::ContentManager> content_manager_;
   std::map<uint8_t, std::unique_ptr<xam::UserProfile>> user_profiles_;
   std::unique_ptr<AchievementManager> achievement_manager_;
+
+  KernelVersion kernel_version_;
 
   xe::global_critical_region global_critical_region_;
 
@@ -353,11 +384,12 @@ class KernelState {
   uint32_t ke_timestamp_bundle_ptr_ = 0;
   std::unique_ptr<xe::threading::HighResolutionTimer> timestamp_timer_;
   cpu::backend::GuestTrampolineGroup kernel_trampoline_group_;
-  //fixed address referenced by dashboards. Data is currently unknown
+  // fixed address referenced by dashboards. Data is currently unknown
   uint32_t strange_hardcoded_page_ = 0x8E038634 & (~0xFFFF);
   uint32_t strange_hardcoded_location_ = 0x8E038634;
 
   friend class XObject;
+
  public:
   uint32_t dash_context_ = 0;
   std::unordered_map<XObject::Type, uint32_t>

@@ -34,6 +34,7 @@
 #include "xenia/gpu/d3d12/d3d12_command_processor.h"
 #include "xenia/gpu/graphics_system.h"
 #include "xenia/hid/input_system.h"
+#include "xenia/kernel/xam/xam_module.h"
 #include "xenia/ui/file_picker.h"
 #include "xenia/ui/graphics_provider.h"
 #include "xenia/ui/imgui_dialog.h"
@@ -274,6 +275,14 @@ void EmulatorWindow::EmulatorWindowListener::OnFileDrop(ui::FileDropEvent& e) {
 
 void EmulatorWindow::EmulatorWindowListener::OnKeyDown(ui::KeyEvent& e) {
   emulator_window_.OnKeyDown(e);
+}
+
+void EmulatorWindow::EmulatorWindowListener::OnMouseDown(ui::MouseEvent& e) {
+  emulator_window_.OnMouseDown(e);
+}
+
+void EmulatorWindow::EmulatorWindowListener::OnMouseUp(ui::MouseEvent& e) {
+  emulator_window_.OnMouseUp(e);
 }
 
 void EmulatorWindow::DisplayConfigGameConfigLoadCallback::PostGameConfigLoad() {
@@ -544,17 +553,26 @@ bool EmulatorWindow::Initialize() {
   auto main_menu = MenuItem::Create(MenuItem::Type::kNormal);
   auto file_menu = MenuItem::Create(MenuItem::Type::kPopup, "&File");
   auto recent_menu = MenuItem::Create(MenuItem::Type::kPopup, "&Open Recent");
+  auto zar_menu = MenuItem::Create(MenuItem::Type::kPopup, "&Zar Package");
   FillRecentlyLaunchedTitlesMenu(recent_menu.get());
   {
     file_menu->AddChild(
         MenuItem::Create(MenuItem::Type::kString, "&Open...", "Ctrl+O",
                          std::bind(&EmulatorWindow::FileOpen, this)));
     file_menu->AddChild(std::move(recent_menu));
-
+    file_menu->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
     file_menu->AddChild(
         MenuItem::Create(MenuItem::Type::kString, "Install Content...",
                          std::bind(&EmulatorWindow::InstallContent, this)));
+    zar_menu->AddChild(
+        MenuItem::Create(MenuItem::Type::kString, "Create",
+                         std::bind(&EmulatorWindow::CreateZarchive, this)));
+    zar_menu->AddChild(
+        MenuItem::Create(MenuItem::Type::kString, "Extract",
+                         std::bind(&EmulatorWindow::ExtractZarchive, this)));
+    file_menu->AddChild(std::move(zar_menu));
 #ifdef DEBUG
+    file_menu->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
     file_menu->AddChild(
         MenuItem::Create(MenuItem::Type::kString, "Close",
                          std::bind(&EmulatorWindow::FileClose, this)));
@@ -864,6 +882,40 @@ void EmulatorWindow::OnKeyDown(ui::KeyEvent& e) {
   e.set_handled(true);
 }
 
+void EmulatorWindow::OnMouseDown(const ui::MouseEvent& e) {
+  ToggleFullscreenOnDoubleClick();
+}
+
+void EmulatorWindow::OnMouseUp(const ui::MouseEvent& e) {
+  last_mouse_up = steady_clock::now();
+}
+
+void EmulatorWindow::ToggleFullscreenOnDoubleClick() {
+  // this function tests if user has double clicked.
+  // if double click was achieved the fullscreen gets toggled
+  const auto now = steady_clock::now();  // current mouse event time
+  const int16_t mouse_down_max_threshold = 250;
+  const int16_t mouse_up_max_threshold = 250;
+  const int16_t mouse_up_down_max_delta = 100;
+  // max delta to prevent 'chaining' of double clicks with next mouse events
+
+  const auto last_mouse_down_delta = diff_in_ms(now, last_mouse_down);
+  if (last_mouse_down_delta >= mouse_down_max_threshold) {
+    last_mouse_down = now;
+    return;
+  }
+
+  const auto last_mouse_up_delta = diff_in_ms(now, last_mouse_up);
+  const auto mouse_event_deltas = diff_in_ms(last_mouse_up, last_mouse_down);
+  if (last_mouse_up_delta >= mouse_up_max_threshold) {
+    return;
+  }
+
+  if (mouse_event_deltas < mouse_up_down_max_delta) {
+    ToggleFullscreen();
+  }
+}
+
 void EmulatorWindow::FileDrop(const std::filesystem::path& path) {
   if (!emulator_initialized_) {
     return;
@@ -915,20 +967,158 @@ void EmulatorWindow::InstallContent() {
     paths = file_picker->selected_files();
   }
 
-  if (!paths.empty()) {
-    for (auto path : paths) {
-      // Normalize the path and make absolute.
-      auto abs_path = std::filesystem::absolute(path);
-      auto result = emulator_->InstallContentPackage(abs_path);
+  if (paths.empty()) {
+    return;
+  }
 
-      if (result != X_STATUS_SUCCESS) {
-        XELOGE("Failed to install content! Error code: {:08X}", result);
+  for (auto path : paths) {
+    // Normalize the path and make absolute.
+    auto abs_path = std::filesystem::absolute(path);
+    auto result = emulator_->InstallContentPackage(abs_path);
 
-        xe::ui::ImGuiDialog::ShowMessageBox(
-            imgui_drawer_.get(), "Failed to install content!",
-            "Failed to install content!\n\nCheck xenia.log for technical "
-            "details.");
-      }
+    if (result != X_STATUS_SUCCESS) {
+      XELOGE("Failed to install content! Error code: {:08X}", result);
+
+      xe::ui::ImGuiDialog::ShowMessageBox(
+          imgui_drawer_.get(), "Failed to install content!",
+          "Failed to install content!\n\nCheck xenia.log for technical "
+          "details.");
+    }
+  }
+}
+
+void EmulatorWindow::ExtractZarchive() {
+  std::vector<std::filesystem::path> zarchive_files;
+  std::filesystem::path extract_dir;
+
+  auto file_picker = xe::ui::FilePicker::Create();
+  file_picker->set_mode(ui::FilePicker::Mode::kOpen);
+  file_picker->set_type(ui::FilePicker::Type::kFile);
+  file_picker->set_multi_selection(true);
+  file_picker->set_title("Select Zar Package");
+  file_picker->set_extensions({
+      {"Zarchive Files (*.zar)", "*.zar"},
+  });
+
+  if (file_picker->Show(window_.get())) {
+    zarchive_files = file_picker->selected_files();
+  }
+
+  if (zarchive_files.empty()) {
+    return;
+  }
+
+  file_picker->set_type(ui::FilePicker::Type::kDirectory);
+  file_picker->set_title("Select Directory to Extract");
+
+  if (file_picker->Show(window_.get())) {
+    extract_dir = file_picker->selected_files().front();
+  }
+
+  if (extract_dir.empty()) {
+    return;
+  }
+
+  for (auto& zarchive_file_path : zarchive_files) {
+    // Normalize the path and make absolute.
+    auto abs_path = std::filesystem::absolute(zarchive_file_path);
+    std::filesystem::path abs_extract_dir;
+
+    if (zarchive_files.size() > 1) {
+      abs_extract_dir =
+          std::filesystem::absolute((extract_dir / abs_path.stem()));
+    } else {
+      abs_extract_dir = std::filesystem::absolute(extract_dir);
+    }
+
+    XELOGI("Extracting zar package: {}\n",
+           zarchive_file_path.filename().string());
+
+    auto result = emulator_->ExtractZarchivePackage(abs_path, abs_extract_dir);
+
+    if (result != X_STATUS_SUCCESS) {
+      std::error_code ec;
+
+      // delete incomplete output file
+      std::filesystem::remove(abs_extract_dir, ec);
+
+      XELOGE("Failed to extract Zarchive package.", result);
+
+      xe::ui::ImGuiDialog::ShowMessageBox(
+          imgui_drawer_.get(), "Failed to extract Zarchive package.",
+          "Failed to extract Zarchive package.");
+    }
+  }
+}
+
+void EmulatorWindow::CreateZarchive() {
+  std::vector<std::filesystem::path> content_dirs;
+  std::filesystem::path zarchive_dir;
+
+  auto file_picker = xe::ui::FilePicker::Create();
+  file_picker->set_mode(ui::FilePicker::Mode::kOpen);
+  file_picker->set_type(ui::FilePicker::Type::kDirectory);
+  file_picker->set_multi_selection(true);
+  file_picker->set_title("Select Contents");
+
+  if (file_picker->Show(window_.get())) {
+    content_dirs = file_picker->selected_files();
+  }
+
+  if (content_dirs.empty()) {
+    return;
+  }
+
+  if (content_dirs.size() == 1) {
+    file_picker->set_mode(ui::FilePicker::Mode::kSave);
+    file_picker->set_type(ui::FilePicker::Type::kFile);
+    file_picker->set_multi_selection(false);
+    file_picker->set_file_name(content_dirs.front().stem().string());
+    file_picker->set_default_extension("zar");
+    file_picker->set_title("Zarchive File");
+    file_picker->set_extensions({
+        {"Zarchive File (*.zar)", "*.zar"},
+    });
+  } else {
+    file_picker->set_title("Output Directory");
+  }
+
+  if (file_picker->Show(window_.get())) {
+    zarchive_dir = file_picker->selected_files().front();
+  }
+
+  if (zarchive_dir.empty()) {
+    return;
+  }
+
+  for (auto& content_path : content_dirs) {
+    // Normalize the path and make absolute.
+    auto abs_content_dir = std::filesystem::absolute(content_path);
+    std::filesystem::path abs_zarchive_file;
+
+    if (content_dirs.size() > 1) {
+      abs_zarchive_file = std::filesystem::absolute(
+          (zarchive_dir / abs_content_dir.stem()).replace_extension("zar"));
+    } else {
+      abs_zarchive_file = std::filesystem::absolute(zarchive_dir);
+    }
+
+    XELOGI("Creating zar package: {}\n", abs_zarchive_file.filename().string());
+
+    auto result =
+        emulator_->CreateZarchivePackage(abs_content_dir, abs_zarchive_file);
+
+    if (result != X_ERROR_SUCCESS) {
+      std::error_code ec;
+
+      // delete incomplete output file
+      std::filesystem::remove(abs_zarchive_file, ec);
+
+      XELOGE("Failed to create Zarchive package.", result);
+
+      xe::ui::ImGuiDialog::ShowMessageBox(imgui_drawer_.get(),
+                                          "Failed to create Zarchive package.",
+                                          "Failed to create Zarchive package.");
     }
   }
 }
@@ -1409,7 +1599,7 @@ void EmulatorWindow::ToggleGPUSetting(gpu_cvar value) {
   switch (value) {
     case gpu_cvar::ClearMemoryPageState:
       CommonSaveGPUSetting(CommonGPUSetting::ClearMemoryPageState,
-                          !cvars::clear_memory_page_state);
+                           !cvars::clear_memory_page_state);
       break;
     case gpu_cvar::ReadbackResolve:
       D3D12SaveGPUSetting(D3D12GPUSetting::ReadbackResolve,
@@ -1491,6 +1681,11 @@ void EmulatorWindow::DisplayHotKeysConfig() {
                                       msg);
 }
 
+std::string EmulatorWindow::CanonicalizeFileExtension(
+    const std::filesystem::path& path) {
+  return xe::utf8::lower_ascii(xe::path_to_utf8(path.extension()));
+}
+
 xe::X_STATUS EmulatorWindow::RunTitle(std::filesystem::path path_to_file) {
   bool titleExists = !std::filesystem::exists(path_to_file);
 
@@ -1521,6 +1716,20 @@ xe::X_STATUS EmulatorWindow::RunTitle(std::filesystem::path path_to_file) {
   // Prevent crashing the emulator by not loading a game if a game is already
   // loaded.
   auto abs_path = std::filesystem::absolute(path_to_file);
+
+  auto extension = CanonicalizeFileExtension(abs_path);
+
+  if (extension == ".7z" || extension == ".zip" || extension == ".rar" ||
+      extension == ".tar" || extension == ".gz") {
+    xe::ShowSimpleMessageBox(
+        xe::SimpleMessageBoxType::Error,
+        fmt::format(
+            "Unsupported format!\n"
+            "Xenia does not support running software in an archived format."));
+
+    return X_STATUS_UNSUCCESSFUL;
+  }
+
   auto result = emulator_->LaunchPath(abs_path);
 
   imgui_drawer_.get()->ClearDialogs();
@@ -1533,6 +1742,12 @@ xe::X_STATUS EmulatorWindow::RunTitle(std::filesystem::path path_to_file) {
         "Failed to launch title.\n\nCheck xenia.log for technical details.");
   } else {
     AddRecentlyLaunchedTitle(path_to_file, emulator_->title_name());
+
+    auto xam =
+        emulator_->kernel_state()->GetKernelModule<kernel::xam::XamModule>(
+            "xam.xex");
+
+    xam->loader_data().host_path = xe::path_to_utf8(abs_path);
   }
 
   return result;
@@ -1571,8 +1786,8 @@ void EmulatorWindow::LoadRecentlyLaunchedTitles() {
   try {
     cpptoml::parser p(file);
     parsed_file = p.parse();
-  } catch (cpptoml::parse_exception exception) {
-    // TODO(Gliniak): Better handling of errors, but good enough for now.
+  } catch (cpptoml::parse_exception& exception) {
+    XELOGE("Cannot parse file: recent.toml. Error: {}", exception.what());
     return;
   }
 

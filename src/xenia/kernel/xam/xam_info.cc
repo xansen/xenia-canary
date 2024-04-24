@@ -21,6 +21,10 @@
 #include "xenia/kernel/xboxkrnl/xboxkrnl_threading.h"
 #include "xenia/kernel/xenumerator.h"
 #include "xenia/kernel/xthread.h"
+#include "xenia/ui/imgui_dialog.h"
+#include "xenia/ui/imgui_drawer.h"
+#include "xenia/ui/window.h"
+#include "xenia/ui/windowed_app_context.h"
 #include "xenia/xbox.h"
 
 #if XE_PLATFORM_WIN32
@@ -29,7 +33,18 @@
 
 #include "third_party/fmt/include/fmt/format.h"
 
-DEFINE_int32(avpack, 8, "Video modes", "Video");
+DEFINE_int32(avpack, 8,
+             "Video modes\n"
+             " 0 = PAL-60 Component (SD)\n"
+             " 1 = Unused\n"
+             " 2 = PAL-60 SCART\n"
+             " 3 = 480p Component (HD)\n"
+             " 4 = HDMI+A\n"
+             " 5 = PAL-60 Composite/S-Video\n"
+             " 6 = VGA\n"
+             " 7 = TV PAL-60\n"
+             " 8 = HDMI (default)",
+             "Video");
 DECLARE_int32(user_country);
 DECLARE_int32(user_language);
 
@@ -335,13 +350,25 @@ void XamLoaderLaunchTitle_entry(lpstring_t raw_name_ptr, dword_t flags) {
     if (path.empty()) {
       loader_data.launch_path = "game:\\default.xex";
     } else {
-      if (xe::utf8::find_name_from_guest_path(path) == path) {
-        path = xe::utf8::join_guest_paths(
-            xe::utf8::find_base_guest_path(
-                kernel_state()->GetExecutableModule()->path()),
-            path);
+      loader_data.launch_path = xe::path_to_utf8(path);
+      loader_data.launch_data_present = true;
+    }
+
+    xam->SaveLoaderData();
+
+    if (loader_data.launch_data_present) {
+      auto display_window = kernel_state()->emulator()->display_window();
+      auto imgui_drawer = kernel_state()->emulator()->imgui_drawer();
+
+      if (display_window && imgui_drawer) {
+        display_window->app_context().CallInUIThreadSynchronous(
+            [imgui_drawer]() {
+              xe::ui::ImGuiDialog::ShowMessageBox(
+                  imgui_drawer, "Title was restarted",
+                  "Title closed with new launch data. \nPlease restart Xenia. "
+                  "Game will be loaded automatically.");
+            });
       }
-      loader_data.launch_path = path;
     }
   } else {
     assert_always("Game requested exit to dashboard via XamLoaderLaunchTitle");
@@ -434,8 +461,8 @@ dword_result_t RtlSleep_entry(dword_t dwMilliseconds, dword_t bAlertable) {
                        ? LLONG_MAX
                        : static_cast<LONGLONG>(-10000) * dwMilliseconds;
 
-  X_STATUS result = xboxkrnl::KeDelayExecutionThread(MODE::UserMode, bAlertable,
-                                                     (uint64_t*)&delay, nullptr);
+  X_STATUS result = xboxkrnl::KeDelayExecutionThread(
+      MODE::UserMode, bAlertable, (uint64_t*)&delay, nullptr);
 
   // If the delay was interrupted by an APC, keep delaying the thread
   while (bAlertable && result == X_STATUS_ALERTED) {

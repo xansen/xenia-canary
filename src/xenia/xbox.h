@@ -312,7 +312,6 @@ struct X_EX_TITLE_TERMINATE_REGISTRATION {
 };
 static_assert_size(X_EX_TITLE_TERMINATE_REGISTRATION, 16);
 
-
 enum X_OBJECT_HEADER_FLAGS : uint16_t {
   OBJECT_HEADER_FLAG_NAMED_OBJECT =
       1,  // if set, has X_OBJECT_HEADER_NAME_INFO prior to X_OBJECT_HEADER
@@ -322,19 +321,6 @@ enum X_OBJECT_HEADER_FLAGS : uint16_t {
   OBJECT_HEADER_IS_TITLE_OBJECT = 0x10,  // used in obcreateobject
 
 };
-
-// https://www.nirsoft.net/kernel_struct/vista/OBJECT_HEADER.html
-struct X_OBJECT_HEADER {
-  xe::be<uint32_t> pointer_count;
-  xe::be<uint32_t> handle_count;
-  xe::be<uint32_t> object_type_ptr;  // -0x8 POBJECT_TYPE
-  xe::be<uint16_t> flags;
-  uint8_t unknownE;
-  uint8_t unknownF;
-  // Object lives after this header.
-  // (There's actually a body field here which is the object itself)
-};
-static_assert_size(X_OBJECT_HEADER, 0x10);
 
 struct X_OBJECT_DIRECTORY {
   // each is a pointer to X_OBJECT_HEADER_NAME_INFO
@@ -351,11 +337,13 @@ struct X_OBJECT_HEADER_NAME_INFO {
   xe::be<uint32_t> object_directory;  // pointer to X_OBJECT_DIRECTORY
   X_ANSI_STRING name;
 };
+
 struct X_OBJECT_ATTRIBUTES {
   xe::be<uint32_t> root_directory;  // 0x0
   xe::be<uint32_t> name_ptr;        // 0x4 PANSI_STRING
   xe::be<uint32_t> attributes;      // 0xC
 };
+
 struct X_OBJECT_TYPE {
   xe::be<uint32_t> allocate_proc;  // 0x0
   xe::be<uint32_t> free_proc;      // 0x4
@@ -448,6 +436,13 @@ enum class XContentType : uint32_t {
   kPodcastVideo = 0x00500000,
   kViralVideo = 0x00600000,
   kCommunityGame = 0x02000000,
+};
+
+enum class XDeploymentType : uint32_t {
+  kOpticalDisc = 0,
+  kHardDrive = 1,  // Like extracted?
+  kGoD = 2,
+  kUnknown = 0xFF,
 };
 
 }  // namespace xe

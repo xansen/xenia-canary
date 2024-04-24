@@ -199,11 +199,11 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index,
   uint32_t needed_data_size = 0;
   for (uint32_t i = 0; i < setting_count; ++i) {
     needed_header_size += sizeof(X_USER_PROFILE_SETTING);
-    UserProfile::Setting::Key setting_key;
+    UserData::Key setting_key;
     setting_key.value = static_cast<uint32_t>(setting_ids[i]);
-    switch (static_cast<UserProfile::Setting::Type>(setting_key.type)) {
-      case UserProfile::Setting::Type::WSTRING:
-      case UserProfile::Setting::Type::BINARY:
+    switch (static_cast<X_USER_DATA_TYPE>(setting_key.type)) {
+      case X_USER_DATA_TYPE::WSTRING:
+      case X_USER_DATA_TYPE::BINARY:
         needed_data_size += setting_key.size;
         break;
       default:
@@ -286,7 +286,7 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index,
   out_header->settings_ptr =
       kernel_state()->memory()->HostToGuestVirtual(out_setting);
 
-  UserProfile::SettingByteStream out_stream(
+  DataByteStream out_stream(
       kernel_state()->memory()->HostToGuestVirtual(buffer), buffer, buffer_size,
       needed_header_size);
   for (uint32_t n = 0; n < setting_count; ++n) {
@@ -294,27 +294,20 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index,
     auto setting = user_profile->GetSetting(setting_id);
 
     std::memset(out_setting, 0, sizeof(X_USER_PROFILE_SETTING));
-    out_setting->from = !setting || !setting->is_set   ? 0
-                        : setting->is_title_specific() ? 2
-                                                       : 1;
+    out_setting->from =
+        !setting ? 0 : static_cast<uint32_t>(setting->GetSettingSource());
     if (xuids) {
       out_setting->xuid = user_profile->xuid();
     } else {
       out_setting->xuid = -1;
-      out_setting->user_index = static_cast<uint32_t>(user_index);
+      out_setting->user_index = user_index;
     }
     out_setting->setting_id = setting_id;
 
     if (setting) {
-      out_setting->from = 1;
-      out_setting->data.type = uint8_t(setting->type);
-      if (setting->is_set) {
-        if (setting->is_title_specific()) {
-          out_setting->from = 2;
-        }
-
-        setting->Append(&out_setting->data, &out_stream);
-      }
+      out_setting->data.type = static_cast<X_USER_DATA_TYPE>(
+          setting->GetSettingHeader()->setting_type.value);
+      setting->GetSettingData()->Append(&out_setting->data, &out_stream);
     }
     ++out_setting;
   }
@@ -372,9 +365,8 @@ dword_result_t XamUserWriteProfileSettings_entry(
   for (uint32_t n = 0; n < setting_count; ++n) {
     const X_USER_PROFILE_SETTING& setting = settings[n];
 
-    auto setting_type =
-        static_cast<UserProfile::Setting::Type>(setting.data.type);
-    if (setting_type == UserProfile::Setting::Type::UNSET) {
+    auto setting_type = static_cast<X_USER_DATA_TYPE>(setting.data.type);
+    if (setting_type == X_USER_DATA_TYPE::UNSET) {
       continue;
     }
 
@@ -385,21 +377,12 @@ dword_result_t XamUserWriteProfileSettings_entry(
         setting.data.type);
 
     switch (setting_type) {
-      case UserProfile::Setting::Type::CONTENT:
-      case UserProfile::Setting::Type::BINARY: {
-        UserProfile::Setting::Key setting_key;
-        setting_key.value = static_cast<uint32_t>(setting.setting_id);
-
+      case X_USER_DATA_TYPE::CONTENT:
+      case X_USER_DATA_TYPE::BINARY: {
         uint8_t* binary_ptr =
             kernel_state()->memory()->TranslateVirtual(setting.data.binary.ptr);
 
         size_t binary_size = setting.data.binary.size;
-        if (setting_key.size < binary_size) {
-          XELOGW(
-              "XamUserWriteProfileSettings: binary size > key size. Shrinking "
-              "binary size!");
-          binary_size = setting_key.size;
-        }
         std::vector<uint8_t> bytes;
         if (setting.data.binary.ptr) {
           // Copy provided data
@@ -409,16 +392,19 @@ dword_result_t XamUserWriteProfileSettings_entry(
           // Data pointer was NULL, so just fill with zeroes
           bytes.resize(binary_size, 0);
         }
-        user_profile->AddSetting(
-            std::make_unique<xam::UserProfile::BinarySetting>(
-                setting.setting_id, bytes));
+
+        auto user_setting =
+            std::make_unique<UserSetting>(setting.setting_id, bytes);
+
+        user_setting->SetNewSettingSource(X_USER_PROFILE_SETTING_SOURCE::TITLE);
+        user_profile->AddSetting(std::move(user_setting));
       } break;
-      case UserProfile::Setting::Type::WSTRING:
-      case UserProfile::Setting::Type::DOUBLE:
-      case UserProfile::Setting::Type::FLOAT:
-      case UserProfile::Setting::Type::INT32:
-      case UserProfile::Setting::Type::INT64:
-      case UserProfile::Setting::Type::DATETIME:
+      case X_USER_DATA_TYPE::WSTRING:
+      case X_USER_DATA_TYPE::DOUBLE:
+      case X_USER_DATA_TYPE::FLOAT:
+      case X_USER_DATA_TYPE::INT32:
+      case X_USER_DATA_TYPE::INT64:
+      case X_USER_DATA_TYPE::DATETIME:
       default: {
         XELOGE("XamUserWriteProfileSettings: Unimplemented data type {}",
                setting_type);
@@ -574,123 +560,6 @@ dword_result_t XamShowSigninUI_entry(dword_t unk, dword_t unk_mask) {
 }
 DECLARE_XAM_EXPORT1(XamShowSigninUI, kUserProfiles, kStub);
 
-// TODO(gibbed): probably a FILETIME/LARGE_INTEGER, unknown currently
-struct X_ACHIEVEMENT_UNLOCK_TIME {
-  xe::be<uint32_t> unk_0;
-  xe::be<uint32_t> unk_4;
-};
-
-struct X_ACHIEVEMENT_DETAILS {
-  xe::be<uint32_t> id;
-  xe::be<uint32_t> label_ptr;
-  xe::be<uint32_t> description_ptr;
-  xe::be<uint32_t> unachieved_ptr;
-  xe::be<uint32_t> image_id;
-  xe::be<uint32_t> gamerscore;
-  X_ACHIEVEMENT_UNLOCK_TIME unlock_time;
-  xe::be<uint32_t> flags;
-
-  static const size_t kStringBufferSize = 464;
-};
-static_assert_size(X_ACHIEVEMENT_DETAILS, 36);
-
-class XStaticAchievementEnumerator : public XEnumerator {
- public:
-  struct AchievementDetails {
-    uint32_t id;
-    std::u16string label;
-    std::u16string description;
-    std::u16string unachieved;
-    uint32_t image_id;
-    uint32_t gamerscore;
-    struct {
-      uint32_t unk_0;
-      uint32_t unk_4;
-    } unlock_time;
-    uint32_t flags;
-  };
-
-  XStaticAchievementEnumerator(KernelState* kernel_state,
-                               size_t items_per_enumerate, uint32_t flags)
-      : XEnumerator(
-            kernel_state, items_per_enumerate,
-            sizeof(X_ACHIEVEMENT_DETAILS) +
-                (!!(flags & 7) ? X_ACHIEVEMENT_DETAILS::kStringBufferSize : 0)),
-        flags_(flags) {}
-
-  void AppendItem(AchievementDetails item) {
-    items_.push_back(std::move(item));
-  }
-
-  uint32_t WriteItems(uint32_t buffer_ptr, uint8_t* buffer_data,
-                      uint32_t* written_count) override {
-    size_t count =
-        std::min(items_.size() - current_item_, items_per_enumerate());
-    if (!count) {
-      return X_ERROR_NO_MORE_FILES;
-    }
-
-    size_t size = count * item_size();
-
-    auto details = reinterpret_cast<X_ACHIEVEMENT_DETAILS*>(buffer_data);
-    size_t string_offset =
-        items_per_enumerate() * sizeof(X_ACHIEVEMENT_DETAILS);
-    auto string_buffer =
-        StringBuffer{buffer_ptr + static_cast<uint32_t>(string_offset),
-                     &buffer_data[string_offset],
-                     count * X_ACHIEVEMENT_DETAILS::kStringBufferSize};
-    for (size_t i = 0, o = current_item_; i < count; ++i, ++current_item_) {
-      const auto& item = items_[current_item_];
-      details[i].id = item.id;
-      details[i].label_ptr =
-          !!(flags_ & 1) ? AppendString(string_buffer, item.label) : 0;
-      details[i].description_ptr =
-          !!(flags_ & 2) ? AppendString(string_buffer, item.description) : 0;
-      details[i].unachieved_ptr =
-          !!(flags_ & 4) ? AppendString(string_buffer, item.unachieved) : 0;
-      details[i].image_id = item.image_id;
-      details[i].gamerscore = item.gamerscore;
-      details[i].unlock_time.unk_0 = item.unlock_time.unk_0;
-      details[i].unlock_time.unk_4 = item.unlock_time.unk_4;
-      details[i].flags = item.flags;
-    }
-
-    if (written_count) {
-      *written_count = static_cast<uint32_t>(count);
-    }
-
-    return X_ERROR_SUCCESS;
-  }
-
- private:
-  struct StringBuffer {
-    uint32_t ptr;
-    uint8_t* data;
-    size_t remaining_bytes;
-  };
-
-  uint32_t AppendString(StringBuffer& sb, const std::u16string_view string) {
-    size_t count = string.length() + 1;
-    size_t size = count * sizeof(char16_t);
-    if (size > sb.remaining_bytes) {
-      assert_always();
-      return 0;
-    }
-    auto ptr = sb.ptr;
-    string_util::copy_and_swap_truncating(reinterpret_cast<char16_t*>(sb.data),
-                                          string, count);
-    sb.ptr += static_cast<uint32_t>(size);
-    sb.data += size;
-    sb.remaining_bytes -= size;
-    return ptr;
-  }
-
- private:
-  uint32_t flags_;
-  std::vector<AchievementDetails> items_;
-  size_t current_item_ = 0;
-};
-
 dword_result_t XamUserCreateAchievementEnumerator_entry(
     dword_t title_id, dword_t user_index, dword_t xuid, dword_t flags,
     dword_t offset, dword_t count, lpdword_t buffer_size_ptr,
@@ -712,8 +581,8 @@ dword_result_t XamUserCreateAchievementEnumerator_entry(
     *buffer_size_ptr = static_cast<uint32_t>(entry_size) * count;
   }
 
-  auto e = object_ref<XStaticAchievementEnumerator>(
-      new XStaticAchievementEnumerator(kernel_state(), count, flags));
+  auto e = object_ref<XAchievementEnumerator>(
+      new XAchievementEnumerator(kernel_state(), count, flags));
   auto result = e->Initialize(user_index, 0xFB, 0xB000A, 0xB000B, 0);
   if (XFAILED(result)) {
     return result;
@@ -735,7 +604,7 @@ dword_result_t XamUserCreateAchievementEnumerator_entry(
           kernel_state()->achievement_manager()->GetAchievementUnlockTime(
               entry.id);
 
-      auto item = XStaticAchievementEnumerator::AchievementDetails{
+      auto item = XAchievementEnumerator::AchievementDetails{
           entry.id,
           xe::to_utf16(db.GetStringTableEntry(language, entry.label_id)),
           xe::to_utf16(db.GetStringTableEntry(language, entry.description_id)),
@@ -869,11 +738,11 @@ dword_result_t XamUserCreateStatsEnumerator_entry(
   }
 
   if (buffer_size_ptr) {
-    *buffer_size_ptr = sizeof(X_STATS_DETAILS) * stats_ptr->stats_amount;
+    *buffer_size_ptr = 0;  // sizeof(X_STATS_DETAILS) * stats_ptr->stats_amount;
   }
 
-  auto e = object_ref<XStaticUntypedEnumerator>(
-      new XStaticUntypedEnumerator(kernel_state(), count, flags));
+  auto e = object_ref<XUserStatsEnumerator>(
+      new XUserStatsEnumerator(kernel_state(), 0));
   const X_STATUS result = e->Initialize(user_index, 0xFB, 0xB0023, 0xB0024, 0);
   if (XFAILED(result)) {
     return result;
